@@ -1,0 +1,15 @@
+{
+  "name": "ioe-v3",
+  "version": "0.1.0",
+  "description": "Issue Orchestration Engine v3 — a declarative DAG for continuous issue resolution in Pi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "TODO: github.com/your-name/ioe-v3"
+  },
+  "pi": {
+    "skills": [
+      "./skills"
+    ]
+  }
+}

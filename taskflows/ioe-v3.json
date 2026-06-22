@@ -1,0 +1,14 @@
+{
+  "name": "ioe-v3",
+  "description": "Issue Orchestration Engine v3 — continuous issue resolution as a declarative DAG",
+  "args": {
+    "issue": { "default": "" },
+    "mode": { "default": "sequential" },
+    "base": { "default": "dev" },
+    "budget-usd": { "default": "5.0" },
+    "test-command": { "default": "" }
+  },
+  "concurrency": 4,
+  "budget": { "maxUSD": 5.0 },
+  "phases": []
+}
