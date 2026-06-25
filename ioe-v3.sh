@@ -161,10 +161,10 @@ detect_test_command() {
 
 detect_test_via_agent() {
   # Agent scan over code + docs to infer the test command. $1 is the bash
-  # heuristic hint ("framework\tcommand" or empty). Echoes just the command
-  # string, or empty if nothing can be determined. Consults both code and
-  # documentation; falls back to docs-only when there is no code.
-  local hint_cmd="${1#*$'\t'}"
+  # heuristic hint ("framework\tcommand" or empty). Echoes "framework\tcommand"
+  # or empty. Consults both code and documentation; falls back to docs-only
+  # when there is no code.
+  local hint="$1"
   local out
   out="$(run_agent "You are a test-setup scout. Determine the single command that runs this project's test suite, by consulting BOTH the code and the documentation.
 
@@ -172,9 +172,9 @@ CODE signals: config files (package.json scripts.test, pytest.ini, pyproject.tom
 DOCUMENTATION signals: README, CONTRIBUTING, docs/, and CI config (.github/workflows) — look for 'run tests', 'to test', a Testing section. Docs often give the exact intended command (e.g. 'python -m pytest tests/ -v' rather than just 'pytest -x'). When docs and config disagree on the command form, prefer what the docs specify — that is the project's intended convention.
 If there is no code (no source, no config files), rely on documentation only. If neither code nor docs reveal a test setup, output nothing.
 
-Bash heuristic hint (verify against docs; do not trust blindly): ${hint_cmd:-none}
+Bash heuristic hint (verify against docs; do not trust blindly): ${hint:-none}
 
-Output ONLY the test command on one line (e.g. 'python -m pytest tests/ -v', 'npm test', 'cargo test'). No framework label, no preamble, no quotes. If no test setup exists, output nothing." "Infer the test command for $(pwd) from code and docs." 2>/dev/null)"
+Output ONLY two fields separated by a tab, on one line: <framework>\t<command>. The framework is the testing tool's name (pytest, vitest, jest, mocha, cargo, go, npm, make, platformio), NOT the interpreter prefix (so for 'python -m pytest ...' the framework is 'pytest', not 'python'). The command is the full thing to run. No preamble, no quotes. Example: 'pytest\tpython -m pytest tests/ -v'. If no test setup exists, output nothing." "Infer the test framework and command for $(pwd) from code and docs." 2>/dev/null)"
   out="$(echo "$out" | grep -vE '^\s*$' | tail -1 | sed 's/^["'\'']//;s/["'\'']$//')"
   echo "$out"
 }
@@ -329,10 +329,16 @@ $(cat "$REPO_ROOT/.claude/.scan-results.md")" "Write .claude/design-principles.m
   # test framework — agent scan over code + docs (bash heuristic as hint + fallback)
   HINT="$(detect_test_command)"
   echo "    Scanning code + docs for the test command (may take a minute)..."
-  DETECTED_CMD="$(detect_test_via_agent "$HINT")"
-  [[ -z "$DETECTED_CMD" ]] && DETECTED_CMD="${HINT#*$'\t'}"
-  DETECTED_FW=""
-  [[ -n "$DETECTED_CMD" ]] && DETECTED_FW="$(echo "$DETECTED_CMD" | awk '{print $1}')"
+  DETECTED="$(detect_test_via_agent "$HINT")"
+  # Fallback to the bash heuristic if the agent returned nothing
+  [[ -z "$DETECTED" ]] && DETECTED="$HINT"
+  DETECTED_FW=""; DETECTED_CMD=""
+  if [[ -n "$DETECTED" ]]; then
+    DETECTED_FW="${DETECTED%%$'\t'*}"
+    DETECTED_CMD="${DETECTED#*$'\t'}"
+    # If parsing produced no command (single-field output), treat the whole thing as the command
+    [[ "$DETECTED_FW" == "$DETECTED_CMD" ]] && DETECTED_CMD="$DETECTED_FW"
+  fi
 
   echo "  Testing setup:"
   if [[ -n "$DETECTED_CMD" ]]; then
