@@ -1,15 +1,21 @@
 {
   "name": "ioe-v3",
   "version": "0.1.0",
-  "description": "Issue Orchestration Engine v3 — a declarative DAG for continuous issue resolution in Pi",
+  "description": "Issue Orchestration Engine v3 — a declarative pi-taskflow DAG for continuous issue resolution in Pi",
   "license": "MIT",
+  "keywords": ["pi-package"],
   "repository": {
     "type": "git",
-    "url": "TODO: github.com/your-name/ioe-v3"
+    "url": "https://github.com/jj-link/ioe-v3"
   },
   "pi": {
-    "skills": [
-      "./skills"
-    ]
+    "skills": ["./skills"]
+  },
+  "dependencies": {
+    "pi-taskflow": "*",
+    "@tintinweb/pi-subagents": "*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
   }
 }

@@ -1,0 +1,73 @@
+{
+  "name": "review-continue",
+  "description": "Extra review/fix rounds in an existing worktree, used by the IOE v3 outer skill when the main flow blocked at review-gate with unresolved merge_blockers and the user chose 'continue' or 'fix'. Fixes the known blockers first, then verifies up to 3 rounds.",
+  "agentScope": "user",
+  "concurrency": 4,
+  "args": {
+    "worktree-path": { "default": "", "description": "Absolute path to the existing worktree" },
+    "branch": { "default": "" },
+    "issue-json": { "default": "{}", "description": "Issue object JSON string" },
+    "base": { "default": "dev" },
+    "blockers-json": { "default": "[]", "description": "JSON array string of the unresolved merge_blockers to fix" }
+  },
+  "phases": [
+    {
+      "id": "fix-known",
+      "type": "agent",
+      "agent": "ioe-implementer",
+      "dependsOn": [],
+      "task": "FIX MODE — apply ONLY the known unresolved merge_blockers below. Do NOT commit, do NOT touch anything else.\n\nWorktree: {args.worktree-path}\nMerge blockers to fix:\n{args.blockers-json}\n\nOutput ONLY the fix-mode JSON result from your instructions."
+    },
+    {
+      "id": "review-1",
+      "type": "agent",
+      "agent": "ioe-reviewer",
+      "output": "json",
+      "dependsOn": ["fix-known"],
+      "task": "Adversarial read-only review — continue round 1 (verify after fixing known blockers).\n\nWorktree: {args.worktree-path}\nBranch: {args.branch}\nIssue: {args.issue-json}\nBase (diff against): {args.base}\nRound: continue-1\n\nOutput ONLY the JSON result from your instructions (merge_blockers, merge_blockers_count, in_scope_fixes, in_scope_fixes_count, findings)."
+    },
+    {
+      "id": "fix-2",
+      "type": "agent",
+      "agent": "ioe-implementer",
+      "when": "{steps.review-1.json.merge_blockers_count} > 0",
+      "dependsOn": ["review-1"],
+      "task": "FIX MODE — apply ONLY the merge_blockers below. Do NOT commit.\n\nWorktree: {args.worktree-path}\nMerge blockers to fix:\n{steps.review-1.output}\n\nOutput ONLY the fix-mode JSON result from your instructions."
+    },
+    {
+      "id": "review-2",
+      "type": "agent",
+      "agent": "ioe-reviewer",
+      "output": "json",
+      "when": "{steps.review-1.json.merge_blockers_count} > 0",
+      "dependsOn": ["fix-2"],
+      "task": "Adversarial read-only review — continue round 2.\n\nWorktree: {args.worktree-path}\nBranch: {args.branch}\nIssue: {args.issue-json}\nBase (diff against): {args.base}\nRound: continue-2\n\nOutput ONLY the JSON result from your instructions (merge_blockers, merge_blockers_count, in_scope_fixes, in_scope_fixes_count, findings)."
+    },
+    {
+      "id": "fix-3",
+      "type": "agent",
+      "agent": "ioe-implementer",
+      "when": "{steps.review-2.json.merge_blockers_count} > 0",
+      "dependsOn": ["review-2"],
+      "task": "FIX MODE — apply ONLY the merge_blockers below. Do NOT commit.\n\nWorktree: {args.worktree-path}\nMerge blockers to fix:\n{steps.review-2.output}\n\nOutput ONLY the fix-mode JSON result from your instructions."
+    },
+    {
+      "id": "review-3",
+      "type": "agent",
+      "agent": "ioe-reviewer",
+      "output": "json",
+      "when": "{steps.review-2.json.merge_blockers_count} > 0",
+      "dependsOn": ["fix-3"],
+      "task": "Adversarial read-only review — continue round 3.\n\nWorktree: {args.worktree-path}\nBranch: {args.branch}\nIssue: {args.issue-json}\nBase (diff against): {args.base}\nRound: continue-3\n\nOutput ONLY the JSON result from your instructions (merge_blockers, merge_blockers_count, in_scope_fixes, in_scope_fixes_count, findings)."
+    },
+    {
+      "id": "summary",
+      "type": "agent",
+      "agent": "ioe-triage",
+      "output": "json",
+      "dependsOn": ["review-1", "review-2", "review-3"],
+      "final": true,
+      "task": "Determine whether the implementation is complete after these continue-rounds, and produce the final review summary. Rounds that were `when`-skipped appear empty; ignore them. The LAST completed (non-empty) review round is the current state.\n\nRound 1: {steps.review-1.output}\nRound 2: {steps.review-2.output}\nRound 3: {steps.review-3.output}\n\nRules:\n- `merge_blockers` / `merge_blockers_count` come from the LAST completed round only.\n- `in_scope_fixes` and `findings` are cumulative across completed rounds — concatenate and DEDUPE by file+line.\n- If `merge_blockers_count == 0`: complete. Set `complete: true`, brief `attempt_summary`.\n- If `merge_blockers_count > 0` after these continue-rounds: still not converged. Set `complete: false` and write `attempt_summary` as a concise narrative of what was attempted and what went wrong (weave in each round's `round_summary`, name the unresolved blockers). This is what the user reads to decide the next move.\n- Output ONLY JSON: {\"complete\":true|false, \"attempt_summary\":\"...\", \"merge_blockers\":[...], \"merge_blockers_count\":N, \"in_scope_fixes\":[...], \"in_scope_fixes_count\":N, \"findings\":[]}."
+    }
+  ]
+}

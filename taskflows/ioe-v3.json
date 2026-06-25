@@ -1,14 +1,242 @@
 {
   "name": "ioe-v3",
-  "description": "Issue Orchestration Engine v3 — continuous issue resolution as a declarative DAG",
-  "args": {
-    "issue": { "default": "" },
-    "mode": { "default": "sequential" },
-    "base": { "default": "dev" },
-    "budget-usd": { "default": "5.0" },
-    "test-command": { "default": "" }
-  },
+  "description": "Issue Orchestration Engine v3 — one iteration: select -> plan -> implement -> test -> document -> review(unrolled 3 rounds) -> fold-in -> triage -> report -> merge. Sequential only; spawn a second instance for parallel work.",
+  "agentScope": "user",
   "concurrency": 4,
-  "budget": { "maxUSD": 5.0 },
-  "phases": []
+  "args": {
+    "issue": { "default": "", "description": "Issue number to work on directly; empty = let the selector recommend" },
+    "base": { "default": "dev", "description": "Base branch to branch from and merge into" },
+    "test-command": { "default": "", "description": "Test command to run (empty = skip testing)" },
+    "design-principles": { "default": "false", "description": "true if .claude/design-principles.md exists" },
+    "report-path": { "default": "docs/reports", "description": "Directory for HTML reports" },
+    "completed": { "default": "[]", "description": "JSON array of issue numbers already completed this session (excluded from selection)" },
+    "repo": { "default": "", "description": "owner/repo to work on; empty = current repo" }
+  },
+  "phases": [
+    {
+      "id": "cleanup",
+      "type": "agent",
+      "agent": "ioe-merger",
+      "task": "MODE: cleanup. Remove stale worktrees under .claude/worktrees/ and orphaned ioe-v3-* branches whose worktree no longer exists. Run `git worktree prune` first. Be conservative — only remove things that are clearly orphaned. Report what you removed.",
+      "dependsOn": []
+    },
+    {
+      "id": "select",
+      "type": "agent",
+      "agent": "ioe-selector",
+      "output": "json",
+      "when": "\"{args.issue}\" == \"\"",
+      "dependsOn": ["cleanup"],
+      "task": "Recommend the next single issue to work on. Repo: {args.repo} (empty = current repo). Completed issues to exclude: {args.completed}. Output ONLY the JSON shape from your instructions (recommended_issue, alternatives, rationale, backlog_count)."
+    },
+    {
+      "id": "inject-issue",
+      "type": "agent",
+      "agent": "ioe-selector",
+      "output": "json",
+      "when": "\"{args.issue}\" != \"\"",
+      "dependsOn": ["cleanup"],
+      "task": "Fetch the single specific issue #{args.issue}. Repo: {args.repo} (empty = current repo). Output ONLY the JSON shape from your instructions with alternatives: [] and rationale mentioning --issue was provided."
+    },
+    {
+      "id": "select-approve",
+      "type": "approval",
+      "when": "\"{args.issue}\" == \"\"",
+      "dependsOn": ["select"],
+      "task": "Issue selection recommendation:\n\n{steps.select.output}\n\nApprove = work on the recommended issue. Edit = pick an alternative by number (e.g. '55') or give guidance. Reject = stop this iteration."
+    },
+    {
+      "id": "plan",
+      "type": "agent",
+      "agent": "ioe-planner",
+      "output": "json",
+      "dependsOn": ["select", "inject-issue", "select-approve"],
+      "task": "Create a worktree, run baseline tests, and produce an implementation plan.\n\nIssue JSON: {steps.select.output}{steps.inject-issue.output}\nBase branch: {args.base}\nTest command (may be empty): {args.test-command}\nDesign principles flag: {args.design-principles}\nSelection-gate feedback (may be '(approve)' or a note): {steps.select-approve.output}\n\nOutput ONLY the JSON shape from your instructions, including the echoed `issue` object, worktree_path, branch, baseline_failures, plan, and context."
+    },
+    {
+      "id": "plan-approve",
+      "type": "approval",
+      "dependsOn": ["plan"],
+      "task": "Implementation plan for issue #{steps.plan.json.issue.number} ({steps.plan.json.issue.title}):\n\n{steps.plan.output}\n\nApprove = implement as planned. Edit = adjust (e.g. 'skip file X', 'add coverage for Y', answer open_questions). Reject = abandon this issue and stop."
+    },
+    {
+      "id": "implement",
+      "type": "agent",
+      "agent": "ioe-implementer",
+      "dependsOn": ["plan", "plan-approve"],
+      "task": "Implement the approved plan in the worktree. Do NOT commit.\n\nWorktree: {steps.plan.json.worktree_path}\nIssue: {steps.plan.json.issue}\nPlan: {steps.plan.json.plan}\nContext: {steps.plan.json.context}\nDesign principles flag: {args.design-principles}\nPlan-gate adjustments (may be '(approve)' or a note): {steps.plan-approve.output}\n\nOutput ONLY the JSON result from your instructions."
+    },
+    {
+      "id": "test",
+      "type": "agent",
+      "agent": "ioe-tester",
+      "when": "\"{args.test-command}\" != \"\"",
+      "dependsOn": ["implement", "plan"],
+      "optional": true,
+      "task": "Run the existing test suite and write new tests for the change. Do NOT commit.\n\nWorktree: {steps.plan.json.worktree_path}\nIssue: {steps.plan.json.issue}\nTest command: {args.test-command}\nBaseline failures (pre-existing, do not attribute to the change): {steps.plan.json.baseline_failures}\nDesign principles flag: {args.design-principles}\n\nOutput ONLY the JSON result from your instructions."
+    },
+    {
+      "id": "document",
+      "type": "agent",
+      "agent": "ioe-doc-writer",
+      "dependsOn": ["test", "plan"],
+      "task": "Update documentation for the change. Do NOT commit.\n\nWorktree: {steps.plan.json.worktree_path}\nIssue: {steps.plan.json.issue}\nBase branch (for diff): {args.base}\nDesign principles flag: {args.design-principles}\n\nRead .claude/docs-inventory.md if it exists. Output ONLY the JSON result from your instructions."
+    },
+    {
+      "id": "review-1",
+      "type": "agent",
+      "agent": "ioe-reviewer",
+      "output": "json",
+      "dependsOn": ["document", "plan"],
+      "task": "Adversarial read-only review — round 1 of 3.\n\nWorktree: {steps.plan.json.worktree_path}\nBranch: {steps.plan.json.branch}\nIssue: {steps.plan.json.issue}\nBase (diff against): {args.base}\nRound: 1\n\nOutput ONLY the JSON result from your instructions, including merge_blockers_count, in_scope_fixes_count, and findings."
+    },
+    {
+      "id": "fix-1",
+      "type": "agent",
+      "agent": "ioe-implementer",
+      "when": "{steps.review-1.json.merge_blockers_count} > 0",
+      "dependsOn": ["review-1", "plan"],
+      "task": "FIX MODE — apply ONLY the merge_blockers below. Do NOT commit, do NOT touch anything else.\n\nWorktree: {steps.plan.json.worktree_path}\nMerge blockers to fix:\n{steps.review-1.output}\n\nOutput ONLY the fix-mode JSON result from your instructions."
+    },
+    {
+      "id": "review-2",
+      "type": "agent",
+      "agent": "ioe-reviewer",
+      "output": "json",
+      "when": "{steps.review-1.json.merge_blockers_count} > 0",
+      "dependsOn": ["fix-1", "plan"],
+      "task": "Adversarial read-only review — round 2 of 3 (re-review after fix-1).\n\nWorktree: {steps.plan.json.worktree_path}\nBranch: {steps.plan.json.branch}\nIssue: {steps.plan.json.issue}\nBase (diff against): {args.base}\nRound: 2\n\nOutput ONLY the JSON result from your instructions, including merge_blockers_count, in_scope_fixes_count, and findings."
+    },
+    {
+      "id": "fix-2",
+      "type": "agent",
+      "agent": "ioe-implementer",
+      "when": "{steps.review-2.json.merge_blockers_count} > 0",
+      "dependsOn": ["review-2", "plan"],
+      "task": "FIX MODE — apply ONLY the merge_blockers below. Do NOT commit, do NOT touch anything else.\n\nWorktree: {steps.plan.json.worktree_path}\nMerge blockers to fix:\n{steps.review-2.output}\n\nOutput ONLY the fix-mode JSON result from your instructions."
+    },
+    {
+      "id": "review-3",
+      "type": "agent",
+      "agent": "ioe-reviewer",
+      "output": "json",
+      "when": "{steps.review-2.json.merge_blockers_count} > 0",
+      "dependsOn": ["fix-2", "plan"],
+      "task": "Adversarial read-only review — round 3 of 3 (final round after fix-2).\n\nWorktree: {steps.plan.json.worktree_path}\nBranch: {steps.plan.json.branch}\nIssue: {steps.plan.json.issue}\nBase (diff against): {args.base}\nRound: 3\n\nOutput ONLY the JSON result from your instructions, including merge_blockers_count, in_scope_fixes_count, and findings."
+    },
+    {
+      "id": "review-summary",
+      "type": "agent",
+      "agent": "ioe-triage",
+      "output": "json",
+      "dependsOn": ["review-1", "review-2", "review-3"],
+      "task": "Determine whether the implementation is complete after the review loop, and produce the final review summary. Rounds that were `when`-skipped appear empty; ignore them. The LAST completed (non-empty) review round is the current state of the worktree.\n\nRound 1: {steps.review-1.output}\nRound 2: {steps.review-2.output}\nRound 3: {steps.review-3.output}\n\nRules:\n- `merge_blockers` / `merge_blockers_count` come from the LAST completed round only (blockers are the current state, not cumulative).\n- `in_scope_fixes` and `findings` are cumulative across all completed rounds — concatenate and DEDUPE by file+line.\n- If `merge_blockers_count == 0`: the implementation is complete. Set `complete: true` and `attempt_summary` to a brief 1-2 sentence note (what the loop did, e.g. 'Round 1 found 2 blockers; fix-1 resolved both; round 2 confirmed clean.').\n- If `merge_blockers_count > 0` after 3 rounds: the loop hit its cap without converging. Set `complete: false` and write `attempt_summary` as a concise narrative of what was attempted and what went wrong — weave in each round's `round_summary` and name the specific unresolved blockers. This is what the user reads to decide whether to continue, fix, override, reclassify, or drop.\n- Output ONLY JSON: {\"complete\":true|false, \"attempt_summary\":\"...\", \"merge_blockers\":[...], \"merge_blockers_count\":N, \"in_scope_fixes\":[...], \"in_scope_fixes_count\":N, \"findings\":[]}."
+    },
+    {
+      "id": "review-gate",
+      "type": "gate",
+      "dependsOn": ["review-summary"],
+      "eval": ["{steps.review-summary.json.merge_blockers_count} == 0"],
+      "task": "Confirm whether any unresolved merge_blockers remain after the review loop. If any remain, end with 'VERDICT: BLOCK' and a one-line reason per blocker. If none, end with 'VERDICT: PASS'.\n\n{steps.review-summary.output}"
+    },
+    {
+      "id": "fold-in",
+      "type": "approval",
+      "when": "{steps.review-summary.json.in_scope_fixes_count} > 0",
+      "dependsOn": ["review-gate"],
+      "task": "Author-fold-in fixes suggested by review (not merge-blocking, but an honest author would fold them in):\n\n{steps.review-summary.json.in_scope_fixes}\n\nApprove = apply ALL. Edit = 'go minus 3,5' (skip some), 'adjust 2: <text>' (modify a fix), or 'skip' (apply none and proceed). Reject = stop."
+    },
+    {
+      "id": "fold-in-apply",
+      "type": "agent",
+      "agent": "ioe-implementer",
+      "when": "{steps.review-summary.json.in_scope_fixes_count} > 0",
+      "dependsOn": ["fold-in", "plan", "review-summary"],
+      "task": "FIX MODE — apply the user-approved fold-in fixes. Do NOT commit.\n\nWorktree: {steps.plan.json.worktree_path}\nFold-in decision from the user ('(approve)' = apply all, or an edit note like 'go minus 3,5' / 'adjust 2: ...' / 'skip'): {steps.fold-in.output}\n\nThe in_scope_fixes list to choose from:\n{steps.review-summary.json.in_scope_fixes}\n\nInterpret the decision: '(approve)' = apply all; 'skip' = apply none; 'go minus <ids>' = apply all except those ids; 'adjust <id>: <text>' = apply that one with the modification. Output ONLY the fix-mode JSON result from your instructions."
+    },
+    {
+      "id": "fold-in-verify",
+      "type": "agent",
+      "agent": "ioe-reviewer",
+      "output": "json",
+      "when": "{steps.review-summary.json.in_scope_fixes_count} > 0",
+      "dependsOn": ["fold-in-apply", "plan"],
+      "task": "Adversarial read-only verification review after fold-in fixes were applied.\n\nWorktree: {steps.plan.json.worktree_path}\nBranch: {steps.plan.json.branch}\nIssue: {steps.plan.json.issue}\nBase (diff against): {args.base}\nRound: fold-in-verify\n\nOutput ONLY the JSON result from your instructions (merge_blockers, merge_blockers_count, in_scope_fixes, in_scope_fixes_count, findings)."
+    },
+    {
+      "id": "fold-in-verify-gate",
+      "type": "gate",
+      "when": "{steps.review-summary.json.in_scope_fixes_count} > 0",
+      "dependsOn": ["fold-in-verify"],
+      "eval": ["{steps.fold-in-verify.json.merge_blockers_count} == 0"],
+      "task": "Confirm whether the fold-in fixes introduced any new merge_blockers. If any, end with 'VERDICT: BLOCK' and reasons; otherwise 'VERDICT: PASS'.\n\n{steps.fold-in-verify.output}"
+    },
+    {
+      "id": "triage",
+      "type": "agent",
+      "agent": "ioe-triage",
+      "output": "json",
+      "dependsOn": ["review-gate", "fold-in-verify-gate", "review-summary", "fold-in-verify"],
+      "task": "CONSOLIDATE MODE — consolidate the out-of-scope `findings` from review into proposed triage issues (dedupe repeated patterns into single issues).\n\nFindings from the main review: {steps.review-summary.json.findings}\nFindings from fold-in verification (may be empty if no fold-ins ran): {steps.fold-in-verify.json.findings}\n\nOutput ONLY the JSON from your consolidate mode (proposed_issues, consolidated_from_count)."
+    },
+    {
+      "id": "triage-approve",
+      "type": "approval",
+      "dependsOn": ["triage"],
+      "task": "Proposed triage issues from review findings:\n\n{steps.triage.output}\n\nApprove = create ALL proposed issues. Edit = 'create 1,3' (pick by index), 'drop 2' (exclude), or 'skip' (create none). Reject = stop."
+    },
+    {
+      "id": "triage-create",
+      "type": "agent",
+      "agent": "ioe-triage",
+      "dependsOn": ["triage-approve", "triage"],
+      "optional": true,
+      "task": "CREATE MODE — create the approved triage issues via gh issue create. Repo: {args.repo} (empty = current repo).\n\nProposed issues (from consolidation): {steps.triage.output}\nApproval decision ('(approve)' = create all, edit note = parse per your instructions, '(reject)' = create none): {steps.triage-approve.output}\n\nOutput ONLY the create-mode JSON result from your instructions."
+    },
+    {
+      "id": "reports",
+      "type": "agent",
+      "agent": "ioe-reporter",
+      "dependsOn": ["triage-create", "plan"],
+      "task": "Generate the self-contained HTML report for this issue's branch.\n\nIssue number: {steps.plan.json.issue.number}\nIssue title: {steps.plan.json.issue.title}\nBranch: {steps.plan.json.branch}\nWorktree: {steps.plan.json.worktree_path}\nBase (diff against): {args.base}\nReport directory: {args.report-path}\n\nOutput ONLY the JSON result from your instructions (including report_path)."
+    },
+    {
+      "id": "merge-approve",
+      "type": "approval",
+      "dependsOn": ["reports"],
+      "task": "Implementation complete for issue #{steps.plan.json.issue.number}. Report: {steps.reports.json.report_path}\n\nApprove = merge into {args.base} and CONTINUE to the next issue (the outer skill will loop). Edit = 'merge and stop' or 'stop without merging'. Reject = stop without merging."
+    },
+    {
+      "id": "merge",
+      "type": "agent",
+      "agent": "ioe-merger",
+      "output": "json",
+      "dependsOn": ["merge-approve", "plan", "reports"],
+      "task": "MERGE MODE — perform the merge sequence for this issue.\n\nDecision from the gate ('(approve)' = merge and continue, edit note = 'merge and stop' or 'stop without merging', '(reject)' = stop without merging): {steps.merge-approve.output}\nIssue number: {steps.plan.json.issue.number}\nBranch: {steps.plan.json.branch}\nWorktree: {steps.plan.json.worktree_path}\nBase: {args.base}\nTest command (for post-conflict validation if needed): {args.test-command}\nReport path (for regeneration if needed): {steps.reports.json.report_path}\n\nIf the decision is 'stop without merging', do NOT merge — output the stop-without-merging JSON. If rebase conflicts arise, STOP and output the conflicts JSON (the runtime will pause for the user). Otherwise complete the commit/rebase/merge/cleanup and output the success JSON. Output ONLY the merge-mode JSON from your instructions."
+    },
+    {
+      "id": "conflict-approve",
+      "type": "approval",
+      "when": "\"{steps.merge.json.conflicts}\" == \"true\"",
+      "dependsOn": ["merge"],
+      "task": "Merge conflicts detected while rebasing {steps.plan.json.branch} onto {args.base}.\n\nConflicting files:\n{steps.merge.json.conflicting_files}\n\nResolve the conflicts in the worktree ({steps.plan.json.worktree_path}), stage them with `git add`, then Approve to continue the merge. Reject = abort this merge (leave the worktree as-is)."
+    },
+    {
+      "id": "merge-resume",
+      "type": "agent",
+      "agent": "ioe-merger",
+      "output": "json",
+      "when": "\"{steps.merge.json.conflicts}\" == \"true\"",
+      "dependsOn": ["conflict-approve", "plan", "reports"],
+      "task": "MERGE-RESUME MODE — the user has resolved the rebase conflicts. Finish the sequence.\n\nIssue number: {steps.plan.json.issue.number}\nBranch: {steps.plan.json.branch}\nWorktree: {steps.plan.json.worktree_path}\nBase: {args.base}\nTest command (re-run after resolution; if it fails, STOP and report tests_failed): {args.test-command}\nReport path (regenerate — the prior report no longer matches what lands on base): {steps.reports.json.report_path}\n\nContinue the rebase, validate, regenerate the report, merge into base, and clean up. Output ONLY the merge-resume JSON from your instructions."
+    },
+    {
+      "id": "result",
+      "type": "agent",
+      "agent": "ioe-merger",
+      "dependsOn": ["merge", "merge-resume"],
+      "final": true,
+      "task": "Emit the final iteration result JSON so the outer skill knows how to proceed. The merge-resume output is empty if no conflicts occurred — ignore empty inputs.\n\nMerge output: {steps.merge.output}\nMerge-resume output: {steps.merge-resume.output}\n\nDerive the decision from whichever merge phase completed successfully ('merge and continue' | 'merge and stop' | 'stop without merging'). Output ONLY:\n{\"decision\":\"merge and continue|merge and stop|stop without merging\",\"merged\":true|false,\"issue_number\":N,\"conflicts\":false}\n\nDo NOT run any git commands — just read the outputs above and emit the JSON."
+    }
+  ]
 }
