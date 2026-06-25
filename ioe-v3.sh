@@ -191,11 +191,14 @@ generate_docs_inventory() {
   echo "    Found documentation files:"
   sed 's/^/      /' "$REPO_ROOT/.claude/.docs-scan.md"
   echo ""
-  read -r -p "    Generate docs-inventory.md from this list? [Y/n] " ans
+  read -r -p "    Generate docs-inventory.md from this list? [Y] = generate  ·  [e] = edit list first  ·  [n] = skip " ans
   if [[ "${ans:-}" =~ ^[Nn] ]]; then
     rm -f "$REPO_ROOT/.claude/.docs-scan.md"
     echo "    Skipped."
     return
+  fi
+  if [[ "${ans:-}" =~ ^[Ee] ]]; then
+    "$IOE_EDITOR" "$REPO_ROOT/.claude/.docs-scan.md" </dev/tty >/dev/tty 2>&1 || true
   fi
   run_agent "You are a docs-inventory author. Using the file list below, write a practical .claude/docs-inventory.md with two sections: (1) 'Core files' — each path with a one-line description of what it covers; (2) 'Conventions' — the documentation style actually used in this repo (markdown vs docstrings vs inline config comments), the expected level of detail, and what should always be documented when new features are added. Infer the conventions from the files listed, not from source code. Keep it concise. Write the file directly; output ONLY 'done'.
 
