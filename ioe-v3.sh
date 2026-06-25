@@ -27,6 +27,7 @@ BASE=""
 REBOOTSTRAP=false
 REPO=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+IOE_EDITOR="nano"; command -v nano >/dev/null 2>&1 || IOE_EDITOR="vi"
 
 # --- arg parsing (real parsing, not the model)
 while [[ $# -gt 0 ]]; do
@@ -203,7 +204,7 @@ $(cat "$REPO_ROOT/.claude/.docs-scan.md")" "Write .claude/docs-inventory.md in $
   rm -f "$REPO_ROOT/.claude/.docs-scan.md"
   echo "    Generated $REPO_ROOT/.claude/docs-inventory.md."
   read -r -p "    Review/edit it now? [y/N] " ans2
-  [[ "${ans2:-}" =~ ^[Yy] ]] && "${EDITOR:-vi}" "$REPO_ROOT/.claude/docs-inventory.md" </dev/tty >/dev/tty 2>&1 || true
+  [[ "${ans2:-}" =~ ^[Yy] ]] && "$IOE_EDITOR" "$REPO_ROOT/.claude/docs-inventory.md" </dev/tty >/dev/tty 2>&1 || true
 }
 
 if [[ "$REBOOTSTRAP" == true || ! -f "$CONFIG" ]]; then
@@ -222,7 +223,7 @@ if [[ "$REBOOTSTRAP" == true || ! -f "$CONFIG" ]]; then
     case "${ans:-}" in
       ""|y|Y) DP="true"; echo "    Using existing principles." ;;
       e|E)
-        "${EDITOR:-vi}" "$PRINCIPLES_FILE" </dev/tty >/dev/tty 2>&1 || true
+        "$IOE_EDITOR" "$PRINCIPLES_FILE" </dev/tty >/dev/tty 2>&1 || true
         DP="true"; echo "    Edited."
         ;;
       r|R)
@@ -240,7 +241,7 @@ $(cat "$REPO_ROOT/.claude/.scan-results.md")" "Write .claude/design-principles.m
           rm -f "$REPO_ROOT/.claude/.scan-results.md"
           DP="true"; echo "    Generated $PRINCIPLES_FILE."
           read -r -p "    Review/edit it now? [y/N] " ans3
-          [[ "${ans3:-}" =~ ^[Yy] ]] && "${EDITOR:-vi}" "$PRINCIPLES_FILE" </dev/tty >/dev/tty 2>&1 || true
+          [[ "${ans3:-}" =~ ^[Yy] ]] && "$IOE_EDITOR" "$PRINCIPLES_FILE" </dev/tty >/dev/tty 2>&1 || true
         else
           rm -f "$REPO_ROOT/.claude/.scan-results.md"
           echo "    Skipped generation."
@@ -267,10 +268,10 @@ $(cat "$REPO_ROOT/.claude/.scan-results.md")" "Write .claude/design-principles.m
         rm -f "$REPO_ROOT/.claude/.scan-results.md"
         DP="true"; echo "    Generated $PRINCIPLES_FILE."
         read -r -p "    Review/edit it now? [y/N] " ans3
-        [[ "${ans3:-}" =~ ^[Yy] ]] && "${EDITOR:-vi}" "$PRINCIPLES_FILE" </dev/tty >/dev/tty 2>&1 || true
+        [[ "${ans3:-}" =~ ^[Yy] ]] && "$IOE_EDITOR" "$PRINCIPLES_FILE" </dev/tty >/dev/tty 2>&1 || true
         ;;
       m|M)
-        "${EDITOR:-nano}" "$PRINCIPLES_FILE" </dev/tty >/dev/tty 2>&1 || true
+        "$IOE_EDITOR" "$PRINCIPLES_FILE" </dev/tty >/dev/tty 2>&1 || true
         [[ -f "$PRINCIPLES_FILE" ]] && DP="true" || echo "    No file written — skipped."
         ;;
       *) echo "    Skipped." ;;
@@ -287,7 +288,7 @@ $(cat "$REPO_ROOT/.claude/.scan-results.md")" "Write .claude/design-principles.m
     read -r -p "    > " ans
     case "${ans:-}" in
       ""|y|Y) DI="true"; echo "    Using existing inventory." ;;
-      e|E) "${EDITOR:-vi}" "$DOCS_FILE" </dev/tty >/dev/tty 2>&1 || true; DI="true" ;;
+      e|E) "$IOE_EDITOR" "$DOCS_FILE" </dev/tty >/dev/tty 2>&1 || true; DI="true" ;;
       r|R) generate_docs_inventory; DI="true" ;;
       k|K) DI="false"; echo "    Skipped (existing left in place)." ;;
       *) DI="true" ;;
