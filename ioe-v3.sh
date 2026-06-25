@@ -159,6 +159,26 @@ detect_test_command() {
   echo ""
 }
 
+detect_test_via_agent() {
+  # Agent scan over code + docs to infer the test command. $1 is the bash
+  # heuristic hint ("framework\tcommand" or empty). Echoes just the command
+  # string, or empty if nothing can be determined. Consults both code and
+  # documentation; falls back to docs-only when there is no code.
+  local hint_cmd="${1#*$'\t'}"
+  local out
+  out="$(run_agent "You are a test-setup scout. Determine the single command that runs this project's test suite, by consulting BOTH the code and the documentation.
+
+CODE signals: config files (package.json scripts.test, pytest.ini, pyproject.toml [tool.pytest], setup.cfg, Cargo.toml, go.mod, platformio.ini, Makefile test target), test directories (tests/, test/, __tests__), and source that reveals the framework.
+DOCUMENTATION signals: README, CONTRIBUTING, docs/, and CI config (.github/workflows) — look for 'run tests', 'to test', a Testing section. Docs often give the exact intended command (e.g. 'python -m pytest tests/ -v' rather than just 'pytest -x'). When docs and config disagree on the command form, prefer what the docs specify — that is the project's intended convention.
+If there is no code (no source, no config files), rely on documentation only. If neither code nor docs reveal a test setup, output nothing.
+
+Bash heuristic hint (verify against docs; do not trust blindly): ${hint_cmd:-none}
+
+Output ONLY the test command on one line (e.g. 'python -m pytest tests/ -v', 'npm test', 'cargo test'). No framework label, no preamble, no quotes. If no test setup exists, output nothing." "Infer the test command for $(pwd) from code and docs." 2>/dev/null)"
+  out="$(echo "$out" | grep -vE '^\s*$' | tail -1 | sed 's/^["'\'']//;s/["'\'']$//')"
+  echo "$out"
+}
+
 write_config() {
   # args: test_framework test_command design_principles docs_inventory report_path base repo
   cat > "$CONFIG" <<EOF
@@ -306,13 +326,13 @@ $(cat "$REPO_ROOT/.claude/.scan-results.md")" "Write .claude/design-principles.m
     esac
   fi
 
-  # test framework — detect, suggest, let user adjust, or set up fresh
-  DETECTED="$(detect_test_command)"
-  DETECTED_FW=""; DETECTED_CMD=""
-  if [[ -n "$DETECTED" ]]; then
-    DETECTED_FW="${DETECTED%%$'\t'*}"
-    DETECTED_CMD="${DETECTED#*$'\t'}"
-  fi
+  # test framework — agent scan over code + docs (bash heuristic as hint + fallback)
+  HINT="$(detect_test_command)"
+  echo "    Scanning code + docs for the test command (may take a minute)..."
+  DETECTED_CMD="$(detect_test_via_agent "$HINT")"
+  [[ -z "$DETECTED_CMD" ]] && DETECTED_CMD="${HINT#*$'\t'}"
+  DETECTED_FW=""
+  [[ -n "$DETECTED_CMD" ]] && DETECTED_FW="$(echo "$DETECTED_CMD" | awk '{print $1}')"
 
   echo "  Testing setup:"
   if [[ -n "$DETECTED_CMD" ]]; then
