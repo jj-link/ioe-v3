@@ -187,7 +187,7 @@ run_agent() {
 # user approve/edit, write .claude/docs-inventory.md. Sets DI=true on success.
 generate_docs_inventory() {
   echo "    Scanning repo for documentation files (may take a minute)..."
-  run_agent "You are a docs-inventory scout. Find documentation files in the repo: README, docs/ directory contents, CHANGELOG, API docs, config docs, inline doc conventions. Output a concise list of paths with a one-line description each (no preamble, no file writes). Format: '- <path> — <description>'." "Scan $(pwd) and list documentation files." > "$REPO_ROOT/.claude/.docs-scan.md"
+  run_agent "You are a docs-inventory scout. Find files that are actual documentation — meant to be read by humans to understand or operate the project.\n\nINCLUDE: README files, CHANGELOG, CONTRIBUTING, LICENSE, AUTHORS, files under a docs/ directory, config files with inline comments explaining their own keys (e.g. config.ini, dashboard.service), and dependency manifests (requirements.txt, package.json).\n\nEXCLUDE (never list these): source code, tests, data files (json/yaml/csv datasets), build artifacts, and anything under local/tooling directories — .git, .claude, .pi, .opencode, .codex, .agents, node_modules, venv, __pycache__, .pytest_cache, .mypy_cache, dist, build. Internal state files and session logs are not documentation.\n\nIf a docs/ directory is empty or contains only non-doc files, say so in one line — do not list empty subdirectories individually.\n\nOutput a concise list of paths (relative to repo root) with a one-line description each. No preamble, no file writes. Format: '- <path> — <description>'. If nothing qualifies beyond the README, output just that." "Scan $(pwd) and list documentation files." > "$REPO_ROOT/.claude/.docs-scan.md"
   echo "    Found documentation files:"
   sed 's/^/      /' "$REPO_ROOT/.claude/.docs-scan.md"
   echo ""
@@ -197,7 +197,7 @@ generate_docs_inventory() {
     echo "    Skipped."
     return
   fi
-  run_agent "You are a docs-inventory author. Using the file list below, write a practical .claude/docs-inventory.md with two sections: (1) 'Core files' — each approved path with a one-line description of what it covers; (2) 'Conventions' — documentation style (JSDoc/docstrings/markdown), expected level of detail, what should always be documented. Write the file directly; output ONLY 'done'.
+  run_agent "You are a docs-inventory author. Using the file list below, write a practical .claude/docs-inventory.md with two sections: (1) 'Core files' — each path with a one-line description of what it covers; (2) 'Conventions' — the documentation style actually used in this repo (markdown vs docstrings vs inline config comments), the expected level of detail, and what should always be documented when new features are added. Infer the conventions from the files listed, not from source code. Keep it concise. Write the file directly; output ONLY 'done'.
 
 Found files:
 $(cat "$REPO_ROOT/.claude/.docs-scan.md")" "Write .claude/docs-inventory.md in $(pwd)." >/dev/null
