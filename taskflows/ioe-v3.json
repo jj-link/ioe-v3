@@ -25,7 +25,7 @@
       "type": "agent",
       "agent": "ioe-selector",
       "output": "json",
-      "when": "\"{args.issue}\" == \"\"",
+      "when": "{args.issue} == \"\"",
       "dependsOn": ["cleanup"],
       "task": "Recommend the next single issue to work on. Repo: {args.repo} (empty = current repo). Completed issues to exclude: {args.completed}. Output ONLY the JSON shape from your instructions (recommended_issue, alternatives, rationale, backlog_count)."
     },
@@ -34,14 +34,14 @@
       "type": "agent",
       "agent": "ioe-selector",
       "output": "json",
-      "when": "\"{args.issue}\" != \"\"",
+      "when": "{args.issue} != \"\"",
       "dependsOn": ["cleanup"],
       "task": "Fetch the single specific issue #{args.issue}. Repo: {args.repo} (empty = current repo). Output ONLY the JSON shape from your instructions with alternatives: [] and rationale mentioning --issue was provided."
     },
     {
       "id": "select-approve",
       "type": "approval",
-      "when": "\"{args.issue}\" == \"\"",
+      "when": "{args.issue} == \"\"",
       "dependsOn": ["select"],
       "task": "Issue selection recommendation:\n\n{steps.select.output}\n\nApprove = work on the recommended issue. Edit = pick an alternative by number (e.g. '55') or give guidance. Reject = stop this iteration."
     },
@@ -70,7 +70,7 @@
       "id": "test",
       "type": "agent",
       "agent": "ioe-tester",
-      "when": "\"{args.test-command}\" != \"\"",
+      "when": "{args.test-command} != \"\"",
       "dependsOn": ["implement", "plan"],
       "optional": true,
       "task": "Run the existing test suite and write new tests for the change. Do NOT commit.\n\nWorktree: {steps.plan.json.worktree_path}\nIssue: {steps.plan.json.issue}\nTest command: {args.test-command}\nBaseline failures (pre-existing, do not attribute to the change): {steps.plan.json.baseline_failures}\nDesign principles flag: {args.design-principles}\n\nOutput ONLY the JSON result from your instructions."
@@ -217,7 +217,7 @@
     {
       "id": "conflict-approve",
       "type": "approval",
-      "when": "\"{steps.merge.json.conflicts}\" == \"true\"",
+      "when": "{steps.merge.json.conflicts} == true",
       "dependsOn": ["merge"],
       "task": "Merge conflicts detected while rebasing {steps.plan.json.branch} onto {args.base}.\n\nConflicting files:\n{steps.merge.json.conflicting_files}\n\nResolve the conflicts in the worktree ({steps.plan.json.worktree_path}), stage them with `git add`, then Approve to continue the merge. Reject = abort this merge (leave the worktree as-is)."
     },
@@ -226,7 +226,7 @@
       "type": "agent",
       "agent": "ioe-merger",
       "output": "json",
-      "when": "\"{steps.merge.json.conflicts}\" == \"true\"",
+      "when": "{steps.merge.json.conflicts} == true",
       "dependsOn": ["conflict-approve", "plan", "reports"],
       "task": "MERGE-RESUME MODE — the user has resolved the rebase conflicts. Finish the sequence.\n\nIssue number: {steps.plan.json.issue.number}\nBranch: {steps.plan.json.branch}\nWorktree: {steps.plan.json.worktree_path}\nBase: {args.base}\nTest command (re-run after resolution; if it fails, STOP and report tests_failed): {args.test-command}\nReport path (regenerate — the prior report no longer matches what lands on base): {steps.reports.json.report_path}\n\nContinue the rebase, validate, regenerate the report, merge into base, and clean up. Output ONLY the merge-resume JSON from your instructions."
     },
