@@ -402,7 +402,7 @@ $(cat "$REPO_ROOT/.claude/.scan-results.md")" "Write .claude/design-principles.m
   fi
 
   # report path
-  read -r -p "  Where should HTML reports be saved? [docs/reports] " REPORT_PATH
+  read -r -p "  Where should issue reports be saved? [docs/reports] " REPORT_PATH
   REPORT_PATH="${REPORT_PATH:-docs/reports}"
 
   write_config "$TEST_FW" "$TEST_CMD" "$DP" "$DI" "$REPORT_PATH" "$BASE" "$REPO"
